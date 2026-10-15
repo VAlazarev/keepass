@@ -1,6 +1,6 @@
 [package]
 name = "keepass-drive-vault"
-version = "0.1.0"
+version = "0.1.1"
 description = "Personal encrypted password vault with Google Drive synchronization"
 authors = ["Keepass Drive Vault"]
 edition = "2021"
