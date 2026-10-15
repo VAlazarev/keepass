@@ -5,6 +5,7 @@ use tauri::State;
 use crate::core::model::{Entry, EntryInput};
 use crate::core::vault::Vault;
 use crate::session::{SessionError, VaultSession, VaultSnapshot};
+use crate::storage::local::StorageError;
 
 pub struct AppState {
     pub session: Mutex<VaultSession>,
@@ -32,9 +33,21 @@ fn map_error(error: SessionError) -> CommandError {
             code: "LOCKED",
             message: "Хранилище заблокировано",
         },
-        SessionError::Storage(_) | SessionError::PathNotSet => CommandError {
-            code: "VAULT_ERROR",
-            message: "Не удалось открыть хранилище",
+        SessionError::PathNotSet => CommandError {
+            code: "PATH_NOT_SET",
+            message: "Не указан путь к файлу хранилища",
+        },
+        SessionError::Storage(StorageError::Io(_)) => CommandError {
+            code: "STORAGE_IO_ERROR",
+            message: "Не удалось прочитать или записать файл хранилища",
+        },
+        SessionError::Storage(StorageError::Serialization(_)) => CommandError {
+            code: "VAULT_FORMAT_ERROR",
+            message: "Файл хранилища имеет повреждённый формат",
+        },
+        SessionError::Storage(StorageError::Crypto(_)) => CommandError {
+            code: "VAULT_AUTH_ERROR",
+            message: "Неверный мастер-пароль или файл хранилища повреждён",
         },
     }
 }
@@ -115,4 +128,21 @@ pub fn create_entry(state: State<'_, AppState>, input: EntryInput) -> CommandRes
         message: "Не удалось получить состояние приложения",
     })?;
     session.create_entry(input).map_err(map_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_error;
+    use crate::session::SessionError;
+    use crate::storage::local::StorageError;
+
+    #[test]
+    fn io_failure_reports_a_specific_safe_reason() {
+        let error = map_error(SessionError::Storage(StorageError::Io(
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        )));
+
+        assert_eq!(error.code, "STORAGE_IO_ERROR");
+        assert_eq!(error.message, "Не удалось прочитать или записать файл хранилища");
+    }
 }

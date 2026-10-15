@@ -66,6 +66,7 @@ pub struct GroupInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct EntryInput {
     pub group_id: String,
     pub title: String,

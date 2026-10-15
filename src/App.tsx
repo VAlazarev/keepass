@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { APP_NAME } from "./app-config";
 import { filterEntries } from "./lib/catalog";
 import { copyWithTimeout } from "./lib/clipboard";
+import { describeCommandError } from "./lib/command-error";
 import type { Group, VaultData, VaultEntry, VaultSummary } from "./types/vault";
 import "./styles.css";
 
@@ -52,8 +53,9 @@ export default function App() {
       setSummary(nextSummary);
       await loadData();
       setMasterPassword("");
-    } catch {
-      setError(create ? "Не удалось создать хранилище" : "Неверный пароль или повреждённый файл");
+    } catch (cause) {
+      const reason = describeCommandError(cause);
+      setError(create ? `Не удалось создать хранилище: ${reason}` : `Не удалось открыть хранилище: ${reason}`);
     }
   }
 
@@ -86,8 +88,8 @@ export default function App() {
       setSelectedId(entry.id);
       setEditorOpen(false);
       setNewEntry({ title: "", username: "", password: "", url: "", notes: "" });
-    } catch {
-      setError("Не удалось сохранить запись");
+    } catch (cause) {
+      setError(`Не удалось сохранить запись: ${describeCommandError(cause)}`);
     }
   }
 

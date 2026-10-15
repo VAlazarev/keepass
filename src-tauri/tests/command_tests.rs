@@ -1,4 +1,25 @@
 use keepass_drive_vault_lib::session::VaultSession;
+use keepass_drive_vault_lib::core::model::EntryInput;
+
+#[test]
+fn entry_input_accepts_camel_case_tauri_payload() {
+    let input: EntryInput = serde_json::from_value(serde_json::json!({
+        "groupId": "internet",
+        "title": "GitLab",
+        "username": "alice",
+        "password": "secret",
+        "url": "https://gitlab.com",
+        "additionalUrls": [],
+        "notes": "work",
+        "tags": [],
+        "customFields": []
+    }))
+    .unwrap();
+
+    assert_eq!(input.group_id, "internet");
+    assert!(input.additional_urls.is_empty());
+    assert!(input.custom_fields.is_empty());
+}
 
 #[test]
 fn session_can_create_unlock_and_lock_a_vault() {
