@@ -1,7 +1,7 @@
-mod commands;
-mod core;
-mod storage;
-mod sync;
+pub mod commands;
+pub mod core;
+pub mod storage;
+pub mod sync;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
