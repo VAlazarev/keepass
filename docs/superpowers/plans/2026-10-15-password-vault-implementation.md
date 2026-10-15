@@ -1,290 +1,123 @@
-# Windows Password Vault Implementation Plan
+# План реализации менеджера паролей для Windows
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Для исполнителя:** используйте `superpowers:executing-plans` для последовательной реализации задач. Все шаги отмечаются чекбоксами.
 
-**Goal:** Build a Windows desktop password vault with local authenticated encryption, KeePass-like cataloging, and encrypted Google Drive synchronization.
+**Цель:** создать Windows-приложение с локальным зашифрованным хранилищем, каталогизацией уровня KeePassXC и синхронизацией зашифрованного файла через Google Drive.
 
-**Architecture:** Tauri hosts a React/TypeScript UI and a Rust core. The Rust core owns key derivation, encryption, vault serialization, local persistence, and sync orchestration; the UI communicates through typed Tauri commands and never receives the master key. The first implementation delivers a usable local vault before enabling Google Drive and browser integration.
+**Архитектура:** Tauri объединяет React/TypeScript-интерфейс и Rust-ядро. Rust владеет ключами, шифрованием, локальным хранением и синхронизацией; интерфейс получает только данные после разблокировки. Сначала создаётся полноценное локальное хранилище, затем подключается Google Drive.
 
-**Tech Stack:** Tauri 2, Rust, React, TypeScript, SQLite, Argon2id, XChaCha20-Poly1305, Google Drive API/OAuth 2.0, Vitest, Rust unit tests, Playwright or Tauri UI tests.
+**Стек:** Tauri 2, Rust, React, TypeScript, SQLite, Argon2id, XChaCha20-Poly1305, Google Drive API/OAuth 2.0, Vitest и Rust tests.
 
-**Spec:** `docs/superpowers/specs/2026-10-15-windows-password-vault-design.md`
+**Спецификация:** `docs/superpowers/specs/2026-10-15-windows-password-vault-design.md`
 
-## Global Constraints
+## Общие ограничения
 
-- The application is Windows-first and must work offline.
-- Google Drive receives ciphertext only; the master password and derived keys never leave the local vault core.
-- Use audited cryptographic libraries; do not implement custom cryptography.
-- Do not log passwords, keys, decrypted payloads, or OAuth secrets.
-- Failed authentication, tampering, or corrupted vault data must fail closed.
-- Browser autofill is phase 4 and must not block the secure local vault or Drive sync.
-- Destructive operations require confirmation and deleted entries use a recycle bin.
+- Приложение ориентировано на Windows и работает без интернета.
+- Google Drive получает только шифротекст.
+- Мастер-пароль и ключи не покидают локальное ядро.
+- Нельзя писать собственную криптографию.
+- Нельзя писать пароли, ключи и OAuth-секреты в логи.
+- Ошибки пароля, повреждение и подмена должны завершаться безопасным отказом.
+- Автозаполнение браузера является отдельным этапом после локального хранилища и синхронизации.
+- Удаление выполняется через корзину и требует подтверждения.
 
-## Review Focus
+## Задача 1: Каркас проекта и границы модулей
 
-- Wrong master password or tampered ciphertext must return a generic unlock failure and expose no partial data; test in Task 2.
-- Interrupted local writes must preserve the last valid vault; test in Task 3.
-- Remote/local revision conflicts must never silently overwrite data; test in Task 6.
-- Clipboard contents must be cleared after the configured timeout and on lock; test in Task 5.
-- Import data containing duplicates, malformed rows, or empty passwords must be previewed and rejected or resolved explicitly; test in Task 5.
+**Файлы:** `package.json`, `vite.config.ts`, `tsconfig*.json`, `src/App.tsx`, `src/main.tsx`, `src/types/vault.ts`, `src-tauri/Cargo.toml`, `src-tauri/src/{main,lib}.rs`, `src-tauri/src/{commands,core,storage,sync}/mod.rs`, `src-tauri/tauri.conf.json`.
 
-### Task 1: Project bootstrap and typed boundaries
+- [ ] Проверить Node/npm и Rust/Cargo.
+- [ ] Создать минимальный Tauri/Vite-проект.
+- [ ] Описать типы `Group`, `VaultEntry`, `CustomField`, `VaultSummary`, `SyncStatus`.
+- [ ] Добавить smoke-проверки `npm run build` и `cargo test`.
+- [ ] Зафиксировать коммитом `chore: scaffold password vault application`.
 
-**Files:**
-- Create: `src-tauri/Cargo.toml`
-- Create: `src-tauri/src/main.rs`
-- Create: `src-tauri/src/commands/mod.rs`
-- Create: `src-tauri/src/core/mod.rs`
-- Create: `src-tauri/src/storage/mod.rs`
-- Create: `src-tauri/src/sync/mod.rs`
-- Create: `src/App.tsx`
-- Create: `src/main.tsx`
-- Create: `src/types/vault.ts`
-- Create: `package.json`
-- Create: `vite.config.ts`
-- Create: `tsconfig.json`
-- Create: `index.html`
+## Задача 2: Криптографическое ядро
 
-**Interfaces:**
-- Produces Rust module boundaries for `core`, `storage`, `sync`, and `commands`.
-- Produces TypeScript types `VaultSummary`, `Group`, `VaultEntry`, `CustomField`, and `SyncStatus`.
+**Файлы:** `src-tauri/src/core/crypto.rs`, `container.rs`, `error.rs`, `src-tauri/tests/crypto_tests.rs`.
 
-- [ ] **Step 1: Verify local toolchain availability**
+Интерфейсы:
 
-Run `node --version`, `npm --version`, `rustc --version`, and `cargo --version`. Record the available versions in the setup notes if they differ from the selected Tauri requirements.
+- `derive_key(password, salt, params) -> Result<[u8; 32], CryptoError>`;
+- `encrypt_container(password, payload) -> Result<Vec<u8>, CryptoError>`;
+- `decrypt_container(password, container) -> Result<Vec<u8>, CryptoError>`;
+- `validate_container(container) -> Result<ContainerMetadata, CryptoError>`.
 
-- [ ] **Step 2: Scaffold the Tauri/Vite application**
+- [ ] Написать тесты round-trip, неверного пароля, подмены, случайного nonce и неизвестной версии.
+- [ ] Убедиться, что тесты сначала падают из-за отсутствия реализации.
+- [ ] Реализовать Argon2id и XChaCha20-Poly1305 в версионируемом контейнере.
+- [ ] Убедиться, что неверный пароль и подмена дают общий отказ аутентификации.
+- [ ] Запустить `cargo test --all` и создать коммит `feat: add authenticated vault encryption`.
 
-Create the minimal app shell and ensure the default window opens on Windows.
+## Задача 3: Модель хранилища и безопасная запись
 
-- [ ] **Step 3: Define shared domain types**
+**Файлы:** `src-tauri/src/core/model.rs`, `vault.rs`, `src-tauri/src/storage/local.rs`, `src-tauri/tests/vault_tests.rs`.
 
-Define stable serialized fields for groups, entries, tags, URLs, custom fields, attachments, revisions, and sync status. Keep secret values represented only inside Rust vault-core structures; TypeScript receives entry data only after unlock.
+Интерфейсы:
 
-- [ ] **Step 4: Add a smoke test and run the app**
+- `Vault::new()`;
+- `create_group`, `create_entry`, `update_entry`, `move_entry`;
+- `delete_entry`, `restore_entry`;
+- `LocalVaultStore::save` и `LocalVaultStore::load`.
 
-Verify `npm run build` and `cargo test` succeed before adding product behavior.
+- [ ] Написать тесты групп по умолчанию, CRUD, полей, тегов, корзины и истории.
+- [ ] Написать тест прерванной записи и сохранения последней рабочей версии.
+- [ ] Реализовать стабильные ID, мягкое удаление и сериализацию.
+- [ ] Реализовать временный файл, flush и атомарную замену.
+- [ ] Запустить `cargo test --all` и создать коммит `feat: add local vault model and persistence`.
 
-- [ ] **Step 5: Commit**
+## Задача 4: Разблокировка и Tauri-команды
 
-Commit as `chore: scaffold password vault application`.
+**Файлы:** `src-tauri/src/commands/vault_commands.rs`, `src-tauri/src/session.rs`, `src-tauri/tests/command_tests.rs`, `src/types/vault.ts`.
 
-### Task 2: Vault encryption core
+Команды:
 
-**Files:**
-- Create: `src-tauri/src/core/crypto.rs`
-- Create: `src-tauri/src/core/container.rs`
-- Create: `src-tauri/src/core/error.rs`
-- Create: `src-tauri/tests/crypto_tests.rs`
+- `create_vault(path, password)`;
+- `unlock_vault(path, password)`;
+- `lock_vault()`;
+- `get_vault_snapshot()`;
+- `save_vault()`;
+- `upsert_entry(input)`;
+- `delete_entry(id)`.
 
-**Interfaces:**
-- `derive_key(password: &[u8], salt: &[u8], params: KdfParams) -> Result<[u8; 32], CryptoError>`
-- `encrypt_container(password: &[u8], payload: &[u8]) -> Result<Vec<u8>, CryptoError>`
-- `decrypt_container(password: &[u8], container: &[u8]) -> Result<Vec<u8>, CryptoError>`
-- `validate_container(container: &[u8]) -> Result<ContainerMetadata, CryptoError>`
+- [ ] Написать тесты создания, разблокировки, отказа, блокировки и запрета команд в locked-состоянии.
+- [ ] Реализовать сессию в памяти Rust без передачи ключа в UI.
+- [ ] Зарегистрировать команды и структурированные безопасные ошибки.
+- [ ] Запустить `cargo test --all`, `npm run build` и создать коммит `feat: add vault unlock and command API`.
 
-- [ ] **Step 1: Write failing Rust tests**
+## Задача 5: Интерфейс каталога и локальные функции
 
-Test round-trip encryption, wrong-password rejection, ciphertext tamper rejection, non-deterministic ciphertext for identical plaintext, and unsupported container version rejection.
+**Файлы:** `src/components/UnlockScreen.tsx`, `VaultLayout.tsx`, `GroupTree.tsx`, `EntryTable.tsx`, `EntryEditor.tsx`, `PasswordGenerator.tsx`, `ImportExportDialog.tsx`, `src/lib/clipboard.ts`, `src/lib/password-health.ts`, тесты интерфейса.
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [ ] Написать тесты разблокировки, дерева, поиска, CRUD, восстановления, генератора и preview импорта.
+- [ ] Реализовать layout по референсу: дерево слева, таблица по центру, детали справа.
+- [ ] Добавить стандартные и дополнительные поля, URL, теги, избранное, архив, корзину и вложения.
+- [ ] Добавить таймер очистки буфера, блокировку по бездействию и подтверждение опасных действий.
+- [ ] Запустить `npm test`, `npm run build` и создать коммит `feat: add password vault catalog interface`.
 
-Run `cargo test -p keepass --test crypto_tests` or the project-equivalent command. Expected: compile/test failure because the crypto interfaces do not exist.
+## Задача 6: Синхронизация с Google Drive
 
-- [ ] **Step 3: Implement the versioned authenticated container**
+**Файлы:** `src-tauri/src/sync/google_drive.rs`, `conflicts.rs`, `src-tauri/src/commands/sync_commands.rs`, `src-tauri/tests/sync_tests.rs`, `src/components/SyncCenter.tsx`.
 
-Use Argon2id for password-based key derivation and XChaCha20-Poly1305 for authenticated encryption. Store the format version, KDF parameters, salt, nonce, wrapped metadata, ciphertext, and authentication data. Return a single generic authentication error for wrong password and tampering.
+Интерфейсы:
 
-- [ ] **Step 4: Run the tests and verify they pass**
+- `GoogleDriveSync::authorize`, `pull`, `push`;
+- `SyncCoordinator::status`, `sync_now`, `resolve_conflict`.
 
-Run `cargo test --all`. Expected: all crypto tests pass.
+- [ ] Написать тесты fake Drive для upload, download, offline, OAuth expiration, конфликта и ciphertext-only payload.
+- [ ] Скрыть Google API за тестируемым provider trait.
+- [ ] Реализовать ревизии, хэши, резервные версии и запрет тихого overwrite.
+- [ ] Добавить команды и UI состояний синхронизации.
+- [ ] Запустить Rust/TypeScript-тесты и ручной OAuth smoke test.
+- [ ] Создать коммит `feat: add encrypted Google Drive synchronization`.
 
-- [ ] **Step 5: Commit**
+## Задача 7: Укрепление и упаковка
 
-Commit as `feat: add authenticated vault encryption`.
+**Файлы:** `src-tauri/src/integration/windows.rs`, `tests/e2e/vault.spec.ts`, `README.md`, `src-tauri/tauri.conf.json`, build script.
 
-### Task 3: Local vault model and crash-safe storage
+- [ ] Добавить end-to-end тесты запуска, CRUD, lock/unlock, backup и shutdown.
+- [ ] Добавить обработку блокировки Windows, горячих клавиш и прав файлов.
+- [ ] Проверить логи, временные файлы, fixture и payload на отсутствие открытых паролей.
+- [ ] Собрать установщик и проверить его на чистой Windows-системе.
+- [ ] Создать коммит `chore: harden and package password vault`.
 
-**Files:**
-- Create: `src-tauri/src/core/model.rs`
-- Create: `src-tauri/src/core/vault.rs`
-- Create: `src-tauri/src/storage/local.rs`
-- Create: `src-tauri/tests/vault_tests.rs`
-
-**Interfaces:**
-- `Vault::new() -> Vault`
-- `Vault::create_group(&mut self, input: GroupInput) -> Result<GroupId, VaultError>`
-- `Vault::create_entry(&mut self, input: EntryInput) -> Result<EntryId, VaultError>`
-- `Vault::update_entry(&mut self, id: EntryId, input: EntryInput) -> Result<(), VaultError>`
-- `Vault::move_entry(&mut self, id: EntryId, group_id: GroupId) -> Result<(), VaultError>`
-- `Vault::delete_entry(&mut self, id: EntryId) -> Result<(), VaultError>`
-- `Vault::restore_entry(&mut self, id: EntryId) -> Result<(), VaultError>`
-- `LocalVaultStore::save(&self, vault: &Vault, password: &[u8]) -> Result<(), StorageError>`
-- `LocalVaultStore::load(&self, password: &[u8]) -> Result<Vault, StorageError>`
-
-- [ ] **Step 1: Write failing model and storage tests**
-
-Cover default groups, entry CRUD, custom fields, tags, recycle-bin restore, revision timestamps, serialization round trips, and preservation of the last valid file after a simulated interrupted write.
-
-- [ ] **Step 2: Run the tests and verify they fail**
-
-Run `cargo test --all`. Expected: failure because model and storage interfaces are not implemented.
-
-- [ ] **Step 3: Implement the domain model**
-
-Use stable IDs, explicit group relationships, entry revisions, and soft deletion. Keep password history and attachments represented in the encrypted vault payload.
-
-- [ ] **Step 4: Implement crash-safe local persistence**
-
-Serialize the vault, encrypt it with Task 2, write to a temporary file in the same directory, flush it, atomically replace the destination, and retain a local recovery copy before replacement.
-
-- [ ] **Step 5: Run tests and commit**
-
-Run `cargo test --all`; expected: PASS. Commit as `feat: add local vault model and persistence`.
-
-### Task 4: Unlock flow and basic Tauri commands
-
-**Files:**
-- Create: `src-tauri/src/commands/vault_commands.rs`
-- Modify: `src-tauri/src/main.rs`
-- Create: `src-tauri/src/session.rs`
-- Create: `src-tauri/tests/command_tests.rs`
-- Modify: `src/types/vault.ts`
-
-**Interfaces:**
-- `create_vault(path: String, password: String) -> CommandResult<VaultSummary>`
-- `unlock_vault(path: String, password: String) -> CommandResult<VaultSummary>`
-- `lock_vault() -> CommandResult<()>`
-- `get_vault_snapshot() -> CommandResult<VaultSnapshot>`
-- `save_vault() -> CommandResult<SaveResult>`
-- `upsert_entry(input: EntryInput) -> CommandResult<VaultEntry>`
-- `delete_entry(id: String) -> CommandResult<()>`
-
-- [ ] **Step 1: Write failing command/session tests**
-
-Test create, unlock, wrong-password failure, lock clearing the session, and refusal to call data commands while locked.
-
-- [ ] **Step 2: Implement an in-memory locked/unlocked session**
-
-Keep the decrypted vault and key inside Rust state only. Tauri commands return sanitized snapshots and never return the master key or raw container.
-
-- [ ] **Step 3: Register commands and test through the command boundary**
-
-Return structured errors suitable for UI messages without revealing whether a password or file path was the sensitive failure.
-
-- [ ] **Step 4: Run tests and commit**
-
-Run `cargo test --all` and `npm run build`. Commit as `feat: add vault unlock and command API`.
-
-### Task 5: KeePass-like catalog UI and local features
-
-**Files:**
-- Create: `src/components/UnlockScreen.tsx`
-- Create: `src/components/VaultLayout.tsx`
-- Create: `src/components/GroupTree.tsx`
-- Create: `src/components/EntryTable.tsx`
-- Create: `src/components/EntryEditor.tsx`
-- Create: `src/components/PasswordGenerator.tsx`
-- Create: `src/components/ImportExportDialog.tsx`
-- Create: `src/lib/clipboard.ts`
-- Create: `src/lib/password-health.ts`
-- Modify: `src/App.tsx`
-- Create: `src/**/*.test.tsx`
-
-**Interfaces:**
-- UI consumes typed Tauri commands from Task 4.
-- UI produces the left group tree, central entry table, details/editor pane, search, filters, generator, and lock controls.
-
-- [ ] **Step 1: Write failing UI tests**
-
-Test unlock states, tree selection, search across title/username/URL/notes/tags, create/edit/delete/restore, hidden/revealed password, copy-and-clear clipboard, generator constraints, and import preview validation.
-
-- [ ] **Step 2: Implement the application shell**
-
-Match the supplied reference layout: left catalog tree, central entries table, and right-side details/editor area. Add responsive behavior for narrow windows and dark/light themes.
-
-- [ ] **Step 3: Implement entry editor and catalog actions**
-
-Support standard fields, custom key/value fields, multiple URLs, tags, groups, notes, password history, attachments metadata, favorites, archive, and recycle bin.
-
-- [ ] **Step 4: Implement security-sensitive UI behavior**
-
-Use timed clipboard clearing, lock on inactivity and Windows workstation lock notification, confirmation dialogs for destructive actions, and no plaintext values in UI error telemetry.
-
-- [ ] **Step 5: Run UI tests and commit**
-
-Run `npm test`, `npm run build`, and the Tauri dev build. Commit as `feat: add password vault catalog interface`.
-
-### Task 6: Google Drive encrypted synchronization
-
-**Files:**
-- Create: `src-tauri/src/sync/google_drive.rs`
-- Create: `src-tauri/src/sync/conflicts.rs`
-- Create: `src-tauri/src/commands/sync_commands.rs`
-- Create: `src-tauri/tests/sync_tests.rs`
-- Create: `src/components/SyncCenter.tsx`
-- Modify: `src/types/vault.ts`
-
-**Interfaces:**
-- `GoogleDriveSync::authorize() -> Result<AccountInfo, SyncError>`
-- `GoogleDriveSync::pull() -> Result<RemoteVault, SyncError>`
-- `GoogleDriveSync::push(container: &[u8], base_revision: Option<&str>) -> Result<SyncReceipt, SyncError>`
-- `SyncCoordinator::status() -> SyncStatus`
-- `SyncCoordinator::sync_now() -> Result<SyncStatus, SyncError>`
-- `SyncCoordinator::resolve_conflict(choice: ConflictChoice) -> Result<SyncStatus, SyncError>`
-
-- [ ] **Step 1: Write failing sync tests with a fake Drive provider**
-
-Cover first upload, download on a second installation, offline pending state, OAuth expiration, remote revision conflict, keep-local/keep-remote/save-both resolution, and ciphertext-only upload assertions.
-
-- [ ] **Step 2: Implement a Drive provider boundary**
-
-Keep Google-specific HTTP/OAuth code behind a trait so sync logic can be tested without network access. Limit Drive access to the app-owned folder scope selected in the design.
-
-- [ ] **Step 3: Implement revision-aware sync**
-
-Use remote revision IDs and content hashes, create recoverable previous versions before replacement, and refuse silent overwrites. Persist only encrypted containers remotely.
-
-- [ ] **Step 4: Add sync commands and UI**
-
-Show synchronized, pending, remote changes, conflict, and authentication failure states with explicit recovery actions.
-
-- [ ] **Step 5: Run tests and commit**
-
-Run `cargo test --all`, `npm test`, and a manual OAuth/Drive smoke test using a test Google project. Commit as `feat: add encrypted Google Drive synchronization`.
-
-### Task 7: Hardening, packaging, and release checks
-
-**Files:**
-- Create: `src-tauri/src/integration/windows.rs`
-- Create: `tests/e2e/vault.spec.ts`
-- Create: `README.md`
-- Create: `.github/workflows/build.yml` or equivalent local build script
-- Modify: `src-tauri/tauri.conf.json`
-
-**Interfaces:**
-- Produces a Windows installer, documented recovery workflow, and repeatable verification commands.
-
-- [ ] **Step 1: Add end-to-end tests**
-
-Test first launch, create/unlock/lock, entry lifecycle, backup restore, sync status, and clean shutdown.
-
-- [ ] **Step 2: Add Windows integration**
-
-Handle workstation lock notifications, global shortcuts, application data paths, startup behavior, and secure default file permissions.
-
-- [ ] **Step 3: Audit sensitive output**
-
-Search logs, temporary directories, build artifacts, and sync fixtures for plaintext password values or OAuth secrets. Verify locked state clears in-memory session data as far as the platform permits.
-
-- [ ] **Step 4: Build and package**
-
-Run the complete Rust and TypeScript test suites, build a Windows installer, and test installation on a clean Windows environment.
-
-- [ ] **Step 5: Commit**
-
-Commit as `chore: harden and package password vault`.
-
-## Execution order
-
-Tasks must be completed in order: 1 → 2 → 3 → 4 → 5 → 6 → 7. Browser autofill is intentionally deferred until after these tasks and should receive a separate design and plan because it introduces an additional trust boundary and browser-specific testing.
+Задачи выполняются по порядку: 1 → 2 → 3 → 4 → 5 → 6 → 7. Браузерное расширение требует отдельного дизайна и плана.
