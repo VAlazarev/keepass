@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Group {
     pub id: String,
     pub parent_id: Option<String>,
@@ -10,6 +11,7 @@ pub struct Group {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomField {
     pub key: String,
     pub value: String,
@@ -17,12 +19,14 @@ pub struct CustomField {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct PasswordRevision {
     pub password: String,
     pub changed_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Attachment {
     pub id: String,
     pub name: String,
@@ -31,6 +35,7 @@ pub struct Attachment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub id: String,
     pub group_id: String,

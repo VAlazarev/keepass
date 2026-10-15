@@ -12,7 +12,10 @@ pub fn run() {
             commands::vault_commands::create_vault,
             commands::vault_commands::unlock_vault,
             commands::vault_commands::lock_vault,
-            commands::vault_commands::get_vault_snapshot
+            commands::vault_commands::get_vault_snapshot,
+            commands::vault_commands::get_vault_data,
+            commands::vault_commands::save_vault,
+            commands::vault_commands::create_entry
         ])
         .run(tauri::generate_context!())
         .expect("error while running Keepass Drive Vault");

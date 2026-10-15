@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use zeroize::Zeroize;
 
+use crate::core::model::{Entry, EntryInput};
 use crate::core::vault::Vault;
 use crate::storage::local::{LocalVaultStore, StorageError};
 
@@ -16,6 +17,7 @@ pub enum SessionError {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VaultSnapshot {
     pub path: String,
     pub name: String,
@@ -89,6 +91,32 @@ impl VaultSession {
         self.vault
             .as_ref()
             .map(operation)
+            .ok_or(SessionError::Locked)
+    }
+
+    pub fn data(&self) -> Result<Vault, SessionError> {
+        self.vault.clone().ok_or(SessionError::Locked)
+    }
+
+    pub fn save(&self) -> Result<(), SessionError> {
+        let path = self.path.as_ref().ok_or(SessionError::PathNotSet)?;
+        let vault = self.vault.as_ref().ok_or(SessionError::Locked)?;
+        LocalVaultStore::new(path).save(vault, &self.password)?;
+        Ok(())
+    }
+
+    pub fn create_entry(&mut self, input: EntryInput) -> Result<Entry, SessionError> {
+        let entry_id = self
+            .vault
+            .as_mut()
+            .ok_or(SessionError::Locked)?
+            .create_entry(input)
+            .map_err(|error| StorageError::Io(std::io::Error::other(error.to_string())))?;
+        self.save()?;
+        self.vault
+            .as_ref()
+            .and_then(|vault| vault.entries.iter().find(|entry| entry.id == entry_id))
+            .cloned()
             .ok_or(SessionError::Locked)
     }
 

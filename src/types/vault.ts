@@ -43,3 +43,9 @@ export interface VaultSummary {
   groupCount: number;
   syncStatus: SyncStatus;
 }
+
+export interface VaultData {
+  schemaVersion: number;
+  groups: Group[];
+  entries: VaultEntry[];
+}
